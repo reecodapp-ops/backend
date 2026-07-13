@@ -1,0 +1,77 @@
+"""Alembic environment — wired to the app's own Settings/engine so a single
+DATABASE_URL (env var or .env) drives both runtime and migrations.
+
+This project's runtime engine is async (asyncpg). Alembic's migration runner is
+sync by design, so we bridge it the standard way for SQLAlchemy 2.0 async apps:
+create an AsyncEngine, then run the actual (sync) migration function via
+``AsyncConnection.run_sync`` inside ``asyncio.run``.
+
+No autogenerate reliance for this project: the schema owns triggers, functions,
+views, and RLS policies that ``target_metadata``-based autogenerate cannot see
+or diff safely. ``target_metadata`` is still set (so `alembic check` /
+autogenerate can help for plain table/column changes), but every migration
+in this project is written by hand and reviewed — see MIGRATION_NOTES.md.
+"""
+from __future__ import annotations
+
+import asyncio
+from logging.config import fileConfig
+
+from alembic import context
+from sqlalchemy import pool
+from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import async_engine_from_config
+
+from app.core.config import settings
+from app.models.base import Base
+import app.models  # noqa: F401 — populate Base.metadata with every model
+
+config = context.config
+
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+target_metadata = Base.metadata
+
+# Always drive the URL from the app's own settings (env var / .env), so
+# migrations never drift from the runtime database the app actually points at.
+config.set_main_option("sqlalchemy.url", settings.database_url)
+
+
+def run_migrations_offline() -> None:
+    url = config.get_main_option("sqlalchemy.url")
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def do_run_migrations(connection: Connection) -> None:
+    context.configure(connection=connection, target_metadata=target_metadata)
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+async def run_async_migrations() -> None:
+    connectable = async_engine_from_config(
+        config.get_section(config.config_ini_section, {}),
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+    async with connectable.connect() as connection:
+        await connection.run_sync(do_run_migrations)
+    await connectable.dispose()
+
+
+def run_migrations_online() -> None:
+    asyncio.run(run_async_migrations())
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
