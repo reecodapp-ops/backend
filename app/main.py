@@ -48,7 +48,7 @@ def create_app() -> FastAPI:
             "http://localhost:5173",
             "http://127.0.0.1:5173",
             #"https://your-frontend-domain.vercel.app",   # <-- add your real deployed frontend URL here later
-            #"https://your-frontend-domain.up.railway.app",  # <-- or here, if you deploy the frontend on Railway instead
+            "https://frontend-production-fe9f.up.railway.app",  # <-- or here, if you deploy the frontend on Railway instead
         ],
         allow_credentials=True,
         allow_methods=["*"],
