@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,6 +33,23 @@ class Settings(BaseSettings):
     db_echo: bool = Field(default=False)
     db_pool_size: int = Field(default=10)
     db_max_overflow: int = Field(default=20)
+
+    @field_validator("database_url")
+    @classmethod
+    def _ensure_asyncpg_driver(cls, v: str) -> str:
+        """Normalize the DB URL to use the asyncpg driver.
+
+        Railway's Postgres plugin (and many other managed Postgres providers)
+        injects DATABASE_URL as a plain 'postgresql://...' string, which uses
+        psycopg2 by default. Since we use SQLAlchemy's async engine
+        (create_async_engine), the URL must use the 'postgresql+asyncpg://'
+        scheme instead. Rewriting it here means we can keep referencing the
+        provider's auto-generated/auto-synced variable directly without
+        needing to hand-edit it (which would just get overwritten again).
+        """
+        if v.startswith("postgresql://"):
+            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
 
     # ----- Security / JWT -----
     jwt_secret_key: str = Field(default="CHANGE_ME_IN_PRODUCTION_dev_only_secret_key")
