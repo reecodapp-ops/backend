@@ -66,6 +66,12 @@ class _SMTPSender(_EmailSender):
 
     Imported lazily so SMTP isn't a hard install dependency when the
     log-only sender is used (e.g. in CI / unit tests).
+
+    NOTE: Many hosting platforms (e.g. Railway on Free/Trial/Hobby plans)
+    block all outbound SMTP ports (25, 465, 587, 2525) to prevent abuse.
+    On those platforms this sender will fail with a connection timeout
+    regardless of credentials. Use the Resend sender (email_provider="resend")
+    instead in that case, since it sends over HTTPS.
     """
 
     def __init__(self, s: Settings) -> None:
@@ -103,6 +109,58 @@ class _SMTPSender(_EmailSender):
         )
 
 
+class _ResendSender(_EmailSender):
+    """Sender using the Resend HTTP API (https://resend.com).
+
+    Sends over HTTPS (port 443), so it works on platforms that block
+    outbound SMTP entirely (e.g. Railway Free/Trial/Hobby plans).
+
+    Requires `httpx` to be installed (already a common FastAPI dependency;
+    add it to requirements.txt / pyproject.toml if it's not already there).
+    """
+
+    _API_URL = "https://api.resend.com/emails"
+
+    def __init__(self, s: Settings) -> None:
+        self._cfg = s
+        if not s.resend_api_key:
+            raise RuntimeError(
+                "RESEND_API_KEY is not set. Set it in the environment when "
+                "EMAIL_PROVIDER=resend."
+            )
+
+    async def send(self, msg: OutgoingEmail) -> None:
+        try:
+            import httpx  # local import, mirrors the aiosmtplib lazy-import pattern
+        except ImportError as exc:  # pragma: no cover - import guard
+            raise RuntimeError(
+                "httpx is not installed. Run `pip install httpx` "
+                "(or add it to your project's dependencies)."
+            ) from exc
+
+        to = (
+            f"{msg.to_name} <{msg.to_address}>" if msg.to_name else msg.to_address
+        )
+        payload = {
+            "from": f"{self._cfg.email_from_name} <{self._cfg.email_from_address}>",
+            "to": [to],
+            "subject": msg.subject,
+            "html": msg.html,
+            "text": msg.text,
+        }
+
+        async with httpx.AsyncClient(timeout=self._cfg.smtp_timeout_seconds) as client:
+            response = await client.post(
+                self._API_URL,
+                headers={
+                    "Authorization": f"Bearer {self._cfg.resend_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            response.raise_for_status()
+
+
 def _build_sender(s: Settings) -> _EmailSender:
     """Return the configured sender. Extend here to add provider strategies.
 
@@ -114,14 +172,14 @@ def _build_sender(s: Settings) -> _EmailSender:
             return _SESSender(s)
         if s.email_provider == "mailgun":
             return _MailgunSender(s)
-        if s.email_provider == "resend":
-            return _ResendSender(s)
     """
     if s.email_log_only:
         return _LogOnlySender()
     provider = (s.email_provider or "smtp").lower()
     if provider == "smtp":
         return _SMTPSender(s)
+    if provider == "resend":
+        return _ResendSender(s)
     raise ValueError(
         f"Unknown email_provider '{provider}'. "
         "Extend _build_sender() in app/core/email_service.py."

@@ -72,7 +72,7 @@ class Settings(BaseSettings):
         ),
     )
 
-    # ----- Email / SMTP ----------------------------------------------------- #
+    # ----- Email / SMTP ------------------------------------------------------ #
     email_provider: str = Field(
         default="smtp",
         description=(
@@ -103,6 +103,21 @@ class Settings(BaseSettings):
         description="Implicit TLS (SMTPS). Use with port 465 when smtp_use_tls is false.",
     )
     smtp_timeout_seconds: int = Field(default=30)
+
+    # ----- Resend (HTTP email API) ------------------------------------------ #
+    resend_api_key: str = Field(
+        default="",
+        description=(
+            "API key for Resend (https://resend.com). Used when "
+            "email_provider='resend'. Sends over HTTPS, so it works on "
+            "platforms (e.g. Railway Free/Hobby) that block outbound SMTP."
+        ),
+    )
+
+    @field_validator("email_provider")
+    @classmethod
+    def _lowercase_email_provider(cls, v: str) -> str:
+        return (v or "smtp").strip().lower()
 
 
 @lru_cache
