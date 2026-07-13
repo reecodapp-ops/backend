@@ -32,19 +32,28 @@ def create_app() -> FastAPI:
         version="1.0.0",
     )
 
+    # NOTE: Middleware added LAST becomes the OUTERMOST layer in Starlette/FastAPI.
+    # RequestLoggingMiddleware must be added BEFORE CORSMiddleware so that
+    # CORSMiddleware wraps everything (including any errors raised inside
+    # RequestLoggingMiddleware) and can still attach CORS headers to the response.
+    # Getting this order backwards causes real 500 errors to show up in the
+    # browser as a fake "CORS policy" block, which is misleading to debug.
+
+    # Logs the raw body of POST/PATCH/PUT requests before validation runs.
+    app.add_middleware(RequestLoggingMiddleware)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
             "http://localhost:5173",
             "http://127.0.0.1:5173",
+            #"https://your-frontend-domain.vercel.app",   # <-- add your real deployed frontend URL here later
+            #"https://your-frontend-domain.up.railway.app",  # <-- or here, if you deploy the frontend on Railway instead
         ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
-
-    # Logs the raw body of POST/PATCH/PUT requests before validation runs.
-    app.add_middleware(RequestLoggingMiddleware)
 
     app.add_exception_handler(AppError, app_error_handler)
     app.add_exception_handler(RequestValidationError, request_validation_error_handler)
